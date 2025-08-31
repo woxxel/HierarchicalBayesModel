@@ -4,7 +4,7 @@ import inspect
 from scipy.special import erfinv
 
 
-def prior_structure(function=None, shape=(1,), hierarchical=False, **kwargs):
+def prior_structure(function=None, shape=(1,), label=None, **kwargs):
     """
     creates a dictionary with appropriate structure for the prior distribution
 
@@ -39,12 +39,11 @@ def prior_structure(function=None, shape=(1,), hierarchical=False, **kwargs):
     ### return dictionary of according structure
     return {
         # "hierarchical": hierarchical,
+        "label": label,
         "has_meta": any(isinstance(val, dict) for val in kwargs.values()),
         "shape": shape,
         "sample": not (function is None),
         "function": function,
-        ## could also just contain the params as entries here?!
-        # **kwargs,
         "parameters": kwargs,
     }
 
