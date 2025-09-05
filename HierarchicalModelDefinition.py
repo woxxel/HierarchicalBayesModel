@@ -66,7 +66,7 @@ class HierarchicalModel:
             "shape":        dims,
             "shape_iter":   tuple(s for s,iter in zip(dims,iter_dims) if iter),
             "n":            len(dims),
-            "n_iter":       len(iter_dims),
+            "n_iter":       np.sum(iter_dims),
             "names":        dimension_names if dimension_names else [f"dimension_{i}_x{dim}" for i,dim in enumerate(dims)],
         }
 
