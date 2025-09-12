@@ -1,6 +1,5 @@
 import numpy as np
 import logging, os
-from pprint import pprint
 import itertools
 
 class HierarchicalModel:
