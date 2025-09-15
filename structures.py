@@ -50,5 +50,47 @@ def prior_structure(function=None, shape=(1,), label=None, **kwargs):
 def halfnorm_ppf(x, loc, scale): 
     return loc + scale * np.sqrt(2) * erfinv(x)
 
+
 def norm_ppf(x, mean, sigma): 
     return mean + sigma * np.sqrt(2) * erfinv(2 * x - 1)
+
+
+def bounded_flat(x, low, high):
+    return x * (high - low) + low
+
+
+def build_key(key, tag, tag_idx=0):
+    return f"{key}_{tag}{tag_idx}"
+
+
+import re
+from typing import Iterable, List, Optional, Tuple
+
+
+def parse_name_and_indices(
+    s: str, literals: Iterable[str]
+) -> Tuple[str, List[Optional[int]]]:
+    """
+    Returns (variable_name, [idx_or_None per literal in the same order]).
+    Variable name = prefix before the first <literal><digits> token.
+    """
+    lits = list(literals)
+    alts = "|".join(map(re.escape, lits))
+    # Don't match inside letter-words; allow underscores and punctuation as separators.
+    rx = re.compile(rf"(?<![A-Za-z])({alts})(\d+)(?![A-Za-z])")
+
+    found = {}
+    first_pos = None
+
+    for m in rx.finditer(s):
+        lit, num = m.group(1), int(m.group(2))
+        if lit not in found:  # keep only first per literal
+            found[lit] = (m.start(), num)
+            if first_pos is None or m.start() < first_pos:
+                first_pos = m.start()
+
+    name = s[: first_pos - 1] if first_pos is not None else s
+    indices: List[Optional[int]] = [
+        found[lit][1] if lit in found else None for lit in lits
+    ]
+    return name, indices

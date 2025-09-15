@@ -19,12 +19,8 @@ class HierarchicalModel:
         os.environ['OPENBLAS_NUM_THREADS'] = '1'
         os.environ['OMP_NUM_THREADS'] = '1'
 
-        # self.dims["n_samples"] = 0   ## requires to be set by method
-
-
     def set_logLevel(self,logLevel):
         self.log.setLevel(logLevel)
-    
 
     def prepare_data(self,event_counts,T,dimension_names=None,iter_dims=None):
         """
@@ -46,7 +42,7 @@ class HierarchicalModel:
 
                 n_datapoints:   here: # neurons; could also be: different stimuli (e.g. places, for place fields)
         """
-        
+
         event_counts = np.atleast_2d(event_counts)
         self.T = T
 
@@ -56,22 +52,34 @@ class HierarchicalModel:
         }
 
         dims = self.data["event_counts"].shape
-        if iter_dims is None:
-            iter_dims = np.ones_like(dims,dtype=bool)
-            iter_dims[-1] = False
-        assert len(iter_dims)==len(dims), f"iter_dims (n={len(iter_dims)}) has to have the same length as the number of dimensions of the data (n={self.dimensions['n']})"
 
         self.dimensions = {
-            "shape":        dims,
-            "shape_iter":   tuple(s for s,iter in zip(dims,iter_dims) if iter),
-            "n":            len(dims),
-            "n_iter":       np.sum(iter_dims),
-            "names":        dimension_names if dimension_names else [f"dimension_{i}_x{dim}" for i,dim in enumerate(dims)],
+            "shape": dims,
+            "n": len(dims),
+            "names": (
+                dimension_names
+                if dimension_names
+                else [f"dimension_{i}_x{dim}" for i, dim in enumerate(dims)]
+            ),
         }
 
-        self.dimensions["iterator"] = list(itertools.product(
-            *[range(s) for s in self.dimensions["shape_iter"]]
-        ))
+        ## create iterator over all none-data-dimensions (only if required)
+        if iter_dims is not False:
+            if iter_dims is None:
+                iter_dims = np.ones_like(dims, dtype=bool)
+                iter_dims[-1] = False
+            assert len(iter_dims) == len(
+                dims
+            ), f"iter_dims (n={len(iter_dims)}) has to have the same length as the number of dimensions of the data (n={self.dimensions['n']})"
+
+            self.dimensions["shape_iter"] = tuple(
+                s for s, iter in zip(dims, iter_dims) if iter
+            )
+            self.dimensions["n_iter"] = np.sum(iter_dims)
+
+            self.dimensions["iterator"] = list(
+                itertools.product(*[range(s) for s in self.dimensions["shape_iter"]])
+            )
 
         self.data["n_neurons"] = np.array(
             [
@@ -81,8 +89,6 @@ class HierarchicalModel:
         )
         # pprint(f"{self.data=}")
         # pprint(f"{self.dimensions=}")
-
-
 
     def set_priors(self, priors_init):
         """
@@ -102,8 +108,10 @@ class HierarchicalModel:
         for prior_key, prior in priors_init.items():
 
             if prior.get("has_meta", False):
-                
-                if np.all(self.dimensions["shape_iter"]==1):
+
+                if self.dimensions.get("n_iter", False) and np.all(
+                    self.dimensions["shape_iter"] == 1
+                ):
                     logging.warning(
                         f"{prior_key} is set as hierarchical, but only one sample is available. \nThis doesn't make much sense. Consider using non-hierarchical priors instead."
                     )
@@ -122,7 +130,6 @@ class HierarchicalModel:
 
         self.wrap = np.zeros(self.n_params).astype('bool')
 
-
     def set_prior_param(
         self, priors_init, param, key=None, has_meta=False
     ):
@@ -139,20 +146,26 @@ class HierarchicalModel:
         self.priors[paramName]["idx"] = self.n_params
 
         # print(f"pre:  {priors_init['shape']} vs {self.dimensions['shape']}")
-        
+
         ## check for proper shapes of priors and align shape
         shape = priors_init["shape"]# + (1,)
-        assert len(shape)<=self.dimensions["n_iter"], f"prior for {paramName} should have {self.dimensions['n_iter']-1} dimensions, but {shape} is provided"
-        for i,dim in enumerate(self.dimensions["shape_iter"][::-1],start=1):
-            if i>len(shape):
-                shape = (1,) + shape
-            assert shape[-i]==1 or shape[-i]==dim, f"prior shape {shape} is not broadcastable to {self.dimensions['shape_iter']}"
-        # print(f"post:  {shape} vs {self.dimensions['shape_iter']}")
+
+        if self.dimensions.get("n_iter", False):
+            assert (
+                len(shape) <= self.dimensions["n_iter"]
+            ), f"prior for {paramName} should have {self.dimensions['n_iter']-1} dimensions, but {shape} is provided"
+            for i, dim in enumerate(self.dimensions["shape_iter"][::-1], start=1):
+                if i > len(shape):
+                    shape = (1,) + shape
+                assert (
+                    shape[-i] == 1 or shape[-i] == dim
+                ), f"prior shape {shape} is not broadcastable to {self.dimensions['shape_iter']}"
+            # print(f"post:  {shape} vs {self.dimensions['shape_iter']}")
 
         self.priors[paramName]["label"] = priors_init.get("label", paramName)
         self.priors[paramName]["shape"] = shape
         self.priors[paramName]["n"] = np.prod(priors_init["shape"])
-        
+
         self.priors[paramName]["has_meta"] = has_meta
 
         if priors_init["function"] is None:
@@ -215,14 +228,14 @@ class HierarchicalModel:
             if len(p_in.shape)==1:
                 p_in = p_in[np.newaxis,...]
             n_chain = p_in.shape[0]
-            
+
             p_out = np.zeros_like(p_in)
 
             for key, prior in self.priors.items():
                 # print(key,prior)
                 if prior["transform"] is None:
                     continue
-                
+
                 input_keys = {}                
                 if prior.get("has_meta", False):
                     ## get input variables and constants for input to hierarchical prior
@@ -293,4 +306,3 @@ class HierarchicalModel:
                 params[var][...] = sliced
 
         return params
-    
