@@ -66,6 +66,13 @@ def run_sampling(
             "cluster_num_live_points": 20,
         }
 
+        logger = logging.getLogger("ultranest")
+        logger.setLevel(logLevel)
+
+        sampling_result = None
+        show_status = True
+        n_steps = 10
+
         sampler = ultranest.ReactiveNestedSampler(
             parameter_names,
             loglikelihood,
@@ -76,25 +83,30 @@ def run_sampling(
             ndraw_min=512,
         )
 
-        logger = logging.getLogger("ultranest")
-        logger.setLevel(logLevel)
+        while True:
+            try:
+                sampler.stepsampler = PopulationSliceSampler(
+                    popsize=2**4,
+                    nsteps=n_steps,
+                    generate_direction=generate_region_oriented_direction,
+                )
 
-        show_status = True
-        n_steps = 10
-        sampler.stepsampler = PopulationSliceSampler(
-            popsize=2**4,
-            nsteps=n_steps,
-            generate_direction=generate_region_oriented_direction,
-        )
-
-        sampling_result = sampler.run(
-            **NS_parameters,
-            region_class=RobustEllipsoidRegion,
-            update_interval_volume_fraction=0.01,
-            show_status=show_status,
-            viz_callback="auto",
-        )
-
+                sampling_result = sampler.run(
+                    **NS_parameters,
+                    region_class=RobustEllipsoidRegion,
+                    update_interval_volume_fraction=0.01,
+                    show_status=show_status,
+                    viz_callback="auto",
+                )
+            except Exception as exc:
+                if type(exc) == KeyboardInterrupt:
+                    break
+                if type(exc) == TimeoutException:
+                    raise TimeoutException("Sampling took too long")
+                n_steps *= 2
+                print(f"increasing step size to {n_steps=}")
+                if n_steps > 100:
+                    break
         return sampling_result, sampler
 
 
@@ -367,3 +379,8 @@ def plot_prior(ax, prior, **kwargs):
 #         results_inferred["distr"][idx][var] = mean[key]
 
 #     return results_inferred
+
+
+class TimeoutException(Exception):
+    def __init__(self, *args, **kwargs):
+        pass

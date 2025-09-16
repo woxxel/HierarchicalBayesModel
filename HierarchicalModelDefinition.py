@@ -82,13 +82,8 @@ class HierarchicalModel:
             )
 
         self.data["n_neurons"] = np.array(
-            [
-                np.isfinite(events).sum(axis=-1)
-                for events in self.data["event_counts"]
-            ]
+            [np.isfinite(events).sum(axis=-1) for events in self.data["event_counts"]]
         )
-        # pprint(f"{self.data=}")
-        # pprint(f"{self.dimensions=}")
 
     def set_priors(self, priors_init):
         """
@@ -295,9 +290,11 @@ class HierarchicalModel:
                     slice_sample = slice(idx_effective, idx_effective + 1)
 
                 # Get the sliced values from p_in
-                sliced = np.squeeze(p_in[slice_chain, slice_sample])
+                # sliced = np.squeeze(p_in[slice_chain, slice_sample])
+                sliced = p_in[slice_chain, slice_sample]
             else:
-                sliced = np.squeeze(self.priors[var]["value"])#[slice_chain])
+                # sliced = np.squeeze(self.priors[var]["value"])#[slice_chain])
+                sliced = self.priors[var]["value"]  # [slice_chain])
 
             # Fill params[var] with the sliced values, handling both scalar and array cases
             if params[var].shape == ():

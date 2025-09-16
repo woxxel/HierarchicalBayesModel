@@ -74,7 +74,12 @@ def parse_name_and_indices(
     Returns (variable_name, [idx_or_None per literal in the same order]).
     Variable name = prefix before the first <literal><digits> token.
     """
-    lits = list(literals)
+
+    if isinstance(literals, str):
+        lits = literals.split()
+    else:
+        lits = list(literals)
+
     alts = "|".join(map(re.escape, lits))
     # Don't match inside letter-words; allow underscores and punctuation as separators.
     rx = re.compile(rf"(?<![A-Za-z])({alts})(\d+)(?![A-Za-z])")
@@ -94,3 +99,23 @@ def parse_name_and_indices(
         found[lit][1] if lit in found else None for lit in lits
     ]
     return name, indices
+
+
+def build_distr_structure_from_params(
+    params_tmp, literal, default_struct, dict_key=None
+):
+
+    dict_key = f"{literal}s" if dict_key is None else dict_key
+    params = {dict_key: []}
+    for key, val in params_tmp.items():
+
+        name, indices = parse_name_and_indices(key, literal)
+        idx = indices[0]
+
+        if not isinstance(idx, int):
+            params[key] = val
+        else:
+            if len(params[dict_key]) < idx + 1:
+                params[dict_key].append(default_struct(0, 0, 0))
+            setattr(params[dict_key][idx], name, val)
+    return params
