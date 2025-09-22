@@ -17,7 +17,9 @@ def run_sampling(
     prior_transform,
     loglikelihood,
     parameter_names,
-    mode="ultranest",
+    periodic=None,
+    reflective=None,
+    mode="dynesty",
     n_live=100,
     nP=1,
     logLevel=logging.ERROR,
@@ -35,7 +37,7 @@ def run_sampling(
             "bound": "single",
             "sample": "rslice",
             # reflective=[BM.priors["p"]["idx"]] if two_pop else False,
-            # periodic=np.where(BM.wrap)[0],
+            "periodic": periodic,
         }
 
         if nP>1:
@@ -155,7 +157,7 @@ def plot_results(BM,results,mode="dynesty",truths=None):
     # priors = {key:prior for key,prior in BM.priors.items() if prior["transform"] is not None}
 
     max_percentile = 99.9
-    
+
     posterior = get_posterior_statistics(results,BM.parameter_names_all,mode=mode)
     plot_params = [key for key in BM.parameter_names if BM.priors[key]["transform"] is not None]
     fig,axes = plt.subplots(nrows=len(plot_params), ncols=1, figsize=(10, 1.5*len(plot_params)),sharex=True)
@@ -188,10 +190,27 @@ def plot_results(BM,results,mode="dynesty",truths=None):
                     axes[i].axhline(posterior[key_hierarchy]["mean"], color=col, linestyle="--", label="posterior (meta)")
 
                     if var=="mean":
-                        y_max = max(y_max,np.percentile(posterior[key_hierarchy]["samples"], [max_percentile],method="inverted_cdf",weights=posterior[key_hierarchy]["weights"]))
+                        try:
+                            y_max = max(
+                                y_max,
+                                np.percentile(
+                                    posterior[key_hierarchy]["samples"],
+                                    [max_percentile],
+                                    method="inverted_cdf",
+                                    weights=posterior[key_hierarchy]["weights"],
+                                ),
+                            )
+                        except:
+                            y_max = max(
+                                y_max,
+                                np.percentile(
+                                    posterior[key_hierarchy]["samples"],
+                                    [max_percentile],
+                                ),
+                            )
                             # ylim=np.percentile(posterior[key_hierarchy]["samples"], [0.01,99.99],method="inverted_cdf",weights=posterior[key_hierarchy]["weights"]))
                         title_str += f" [${posterior[key_hierarchy]['mean']:.3f}\pm{posterior[key_hierarchy]['stdev']:.3f}$]"
-                
+
                 if truths and key in truths:
                     axes[i].axhline(truths[key], color="tab:red", linestyle="--", label="truth")
             else:
@@ -201,7 +220,24 @@ def plot_results(BM,results,mode="dynesty",truths=None):
                 bottom = 1.+n/2
                 plot_posterior(axes[i],posterior[f"{key}_{n}"], bottom=bottom, color="grey", alpha=0.5, label="posterior (pop)" if n==0 else None)
 
-                y_max = max(y_max,np.percentile(posterior[f"{key}_{n}"]["samples"], [max_percentile],method="inverted_cdf",weights=posterior[f"{key}_{n}"]["weights"]))
+                try:
+                    y_max = max(
+                        y_max,
+                        np.percentile(
+                            posterior[f"{key}_{n}"]["samples"],
+                            [max_percentile],
+                            method="inverted_cdf",
+                            weights=posterior[f"{key}_{n}"]["weights"],
+                        ),
+                    )
+                except:
+                    y_max = max(
+                        y_max,
+                        np.percentile(
+                            posterior[f"{key}_{n}"]["samples"], [max_percentile]
+                        ),
+                    )
+                    # ylim=np.percentile(posterior[f"{key}_{n}"]["samples"], [0.01,99.99],method="inverted_cdf",weights=posterior[f"{key}_{n}"]["weights"]))
 
                 if not prior["has_meta"]:
                     axes[i].text(bottom,posterior[f"{key}_{n}"]["mean"],f"${posterior[f'{key}_{n}']['mean']:.3f}\pm{posterior[f'{key}_{n}']['stdev']:.3f}$",va="bottom")
@@ -214,9 +250,7 @@ def plot_results(BM,results,mode="dynesty",truths=None):
 
                         axes[i].plot([bottom,bottom+1./2],[truth]*2,color="tab:red", linestyle="--", label="truth")
 
-            plt.setp(axes[i],ylim=(0,y_max))
-            
-            
+            plt.setp(axes[i], ylim=(0, y_max))
 
         axes[i].set_title(title_str)
         axes[i].spines[["top","right"]].set_visible(False)
@@ -226,7 +260,6 @@ def plot_results(BM,results,mode="dynesty",truths=None):
             xticks=(0,)+tuple(np.linspace(1,1+BM.dimensions["shape"][0]/2-0.5,BM.dimensions["shape"][0])),
             xticklabels=("meta",) + tuple(f"n={n+1}" for n in range(BM.dimensions["shape"][0]))
         )
-
 
     # plt.setp(axes[0],xlim=(0,4))
     plt.tight_layout()
@@ -241,7 +274,12 @@ def plot_posterior(ax,posterior,**kwargs):
     # print(samples_sorted)
     x = posterior["samples"]
     weights = posterior["weights"]
-    span = np.percentile(posterior["samples"], [0.1, 99.9], weights=weights, method="inverted_cdf")
+    try:
+        span = np.percentile(
+            posterior["samples"], [0.1, 99.9], weights=weights, method="inverted_cdf"
+        )
+    except:
+        span = np.percentile(posterior["samples"], [0.1, 99.9])
     span[0] = 0
     sx = 0.02
     bins = int(round(10. / sx))
@@ -251,13 +289,13 @@ def plot_posterior(ax,posterior,**kwargs):
         weights=weights,
         range=np.sort(span)
     )
-    
+
     n = gaussian_filter(n, 10.)
     n /= n.max()*2 * 1.1
-    
+
     ax.plot(offset + n,b[:-1],color=kwargs.get("color","tab:grey"),label=kwargs.get("label"))
     ax.fill_betweenx(b[:-1], offset, offset + n, color=kwargs.get("color", "tab:grey"), alpha=kwargs.get("alpha", 0.7))
-    
+
     ax.plot(offset,posterior["mean"],"o",color=kwargs.get("color","tab:grey"),markersize=5)
 
 def plot_prior(ax, prior, **kwargs):
