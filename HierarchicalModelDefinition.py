@@ -99,6 +99,8 @@ class HierarchicalModel:
         self.priors = {}
 
         self.n_params = 0
+        self.periodic = []
+        self.reflective = []
 
         for prior_key, prior in priors_init.items():
 
@@ -123,7 +125,6 @@ class HierarchicalModel:
             ## then, add the actual parameters for the hierarchical prior
             self.set_prior_param(prior, prior_key, has_meta=prior.get("has_meta", False))
 
-        self.wrap = np.zeros(self.n_params).astype('bool')
 
     def set_prior_param(
         self, priors_init, param, key=None, has_meta=False
@@ -178,6 +179,7 @@ class HierarchicalModel:
             self.priors[paramName]["input_constants"] = {}
 
             for var in priors_init["parameters"].keys():
+                print(var)
                 if self.priors.get(f"{param}_{var}") is None:
                     self.priors[paramName]["input_constants"][var] = priors_init["parameters"][var]
                 else:
@@ -201,8 +203,39 @@ class HierarchicalModel:
 
         if self.priors[paramName]["n"] == 1:
             self.parameter_names_all.append(paramName)
+            self.periodic.append(priors_init["periodic"])
+            self.reflective.append(priors_init["reflective"])
         else:
             self.parameter_names_all.extend([f"{paramName}_{i}" for i in range(self.priors[paramName]["n"])])
+            self.periodic.extend([priors_init["periodic"] for _ in range(self.priors[paramName]["n"])])
+            self.reflective.extend([priors_init["reflective"] for _ in range(self.priors[paramName]["n"])])
+
+
+    def prior_transform_single(self,p_in,key):
+
+        """
+            transforms a single prior parameter from unit hypercube to actual prior
+            and stores value in "current_value" field of prior for quick access
+        """
+                
+        # print(f"Transforming {key} with shape {p_in.shape}")
+        this_prior = self.priors[key]
+        input_keys = {}
+        if this_prior.get("has_meta", False):
+            ## get input variables and constants for input to hierarchical prior
+            input_keys["params"] = {}
+
+            for var in this_prior["input_vars"]:
+                input_keys["params"][var] = self.priors[f"{key}_{var}"]["current_value"]
+            for var in this_prior["input_constants"]:
+                input_keys["params"][var] = this_prior["input_constants"][var]
+
+        this_prior["current_value"] = this_prior["transform"](
+            p_in, 
+            **input_keys
+        )
+        return this_prior["current_value"]
+    
 
     def set_prior_transform(self,vectorized=True):
         '''
@@ -227,29 +260,33 @@ class HierarchicalModel:
             p_out = np.zeros_like(p_in)
 
             for key, prior in self.priors.items():
-                # print(key,prior)
                 if prior["transform"] is None:
                     continue
+                
+                p_out[:, prior["idx"] : prior["idx"] + prior["n"]] = self.prior_transform_single(
+                    p_in[:, prior["idx"]:prior["idx"] + prior["n"]].reshape((n_chain,)+prior["shape"]),
+                    key
+                ).reshape((n_chain,-1))
+                
+                # input_keys = {}
+                # if prior.get("has_meta", False):
+                #     ## get input variables and constants for input to hierarchical prior
+                #     input_keys["params"] = {}
 
-                input_keys = {}                
-                if prior.get("has_meta", False):
-                    ## get input variables and constants for input to hierarchical prior
-                    input_keys["params"] = {}
+                #     for var in prior["input_vars"]:
+                #         # print(f"idx_{var}",prior[f"idx_{var}"], prior[f"n_{var}"])
+                #         input_keys["params"][var] = p_out[:, prior[f"idx_{var}"]:prior[f"idx_{var}"] + prior[f"n_{var}"]].reshape((n_chain,)+self.priors[f"{key}_{var}"]["shape"])
+                #         # print(input_keys["params"][var].shape)
+                #     for var in prior["input_constants"]:
+                #         input_keys["params"][var] = prior["input_constants"][var]
 
-                    for var in prior["input_vars"]:
-                        # print(f"idx_{var}",prior[f"idx_{var}"], prior[f"n_{var}"])
-                        input_keys["params"][var] = p_out[:, prior[f"idx_{var}"]:prior[f"idx_{var}"] + prior[f"n_{var}"]].reshape((n_chain,)+self.priors[f"{key}_{var}"]["shape"])
-                        # print(input_keys["params"][var].shape)
-                    for var in prior["input_constants"]:
-                        input_keys["params"][var] = prior["input_constants"][var]
-
-                # print("params:",input_keys)
-                ## transform the prior parameters
-                p_out[:, prior["idx"] : prior["idx"] + prior["n"]] = \
-                    prior["transform"](
-                        p_in[:, prior["idx"] : prior["idx"] + prior["n"]].reshape((n_chain,)+prior["shape"]), 
-                        **input_keys
-                    ).reshape((n_chain,-1))
+                # # print("params:",input_keys)
+                # # transform the prior parameters
+                # p_out[:, prior["idx"] : prior["idx"] + prior["n"]] = \
+                #     prior["transform"](
+                #         p_in[:, prior["idx"] : prior["idx"] + prior["n"]].reshape((n_chain,)+prior["shape"]), 
+                #         **input_keys
+                #     ).reshape((n_chain,-1))
 
             if vectorized:
                 return p_out

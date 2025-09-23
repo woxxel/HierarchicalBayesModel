@@ -112,10 +112,10 @@ def run_sampling(
         return sampling_result, sampler
 
 
-def get_mean_from_sampler(results, paramNames, mode="ultranest", output="dict"):
+def get_mean_from_sampler(results, parameter_names, mode="dynesty", output="dict"):
 
     mean = {} if output == "dict" else []
-    for i, key in enumerate(paramNames):
+    for i, key in enumerate(parameter_names):
         if mode == "dynesty":
             samp = results.samples[:, i]
             weights = results.importance_weights()
@@ -131,7 +131,10 @@ def get_mean_from_sampler(results, paramNames, mode="ultranest", output="dict"):
     return mean
 
 
-def get_posterior_statistics(results,parameter_names,mode="dynesty"):
+def get_posterior_statistics(results,parameter_names,periodic=False,mode="dynesty"):
+
+    # if not periodic:
+    #     periodic = [False]*len(parameter_names)
 
     posterior = {}
     for i, key in enumerate(parameter_names):
@@ -144,9 +147,38 @@ def get_posterior_statistics(results,parameter_names,mode="dynesty"):
             post["samples"] = results["weighted_samples"]["points"][:, i]
             post["weights"] = results["weighted_samples"]["weights"]
 
+        # samp = post["samples"]
+        if periodic[i]:
+            low = priors[key]["transform"](1)
+            high = 40
+            diff = high - low
+            post["mean"] = weighted_circmean(samp, weights=weights, low=low, high=high)
+            shift_from_center = post["mean"] - diff / 2.0
+
+            samp[samp < np.mod(shift_from_center-low, diff)] += diff
+        # else:
         post["mean"] = (post["samples"] * post["weights"]).sum()
+        
         post["stdev"] = np.sqrt((post["weights"] * (post["samples"] - post["mean"])**2).sum())
 
+        # idx_sorted = np.argsort(samp)
+        # samples_sorted = samp[idx_sorted]
+
+        # # get corresponding weights
+        # sw = weights[idx_sorted]
+
+        # cumsw = np.cumsum(sw)
+        # quants = np.interp(qs, cumsw, samples_sorted)
+
+        # x = self.posterior_arrays[param_name]
+
+        # f = interp1d(
+        #     np.mod(samples_sorted, self.n_bin) if param_name == "theta" else samples_sorted,
+        #     cumsw, 
+        #     bounds_error=False, 
+        #     fill_value="extrapolate"
+        # )
+    
         posterior[key] = post
 
     return posterior
