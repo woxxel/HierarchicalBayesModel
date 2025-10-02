@@ -4,7 +4,7 @@ import numpy as np
 
 from dynesty import NestedSampler, pool as dypool
 import ultranest
-import ultranest.stepsampler
+from ultranest.stepsampler import RegionSliceSampler
 
 from ultranest.popstepsampler import (
     PopulationSliceSampler,
@@ -37,7 +37,7 @@ def run_sampling(
             "bound": "single",
             "sample": "rslice",
             # reflective=[BM.priors["p"]["idx"]] if two_pop else False,
-            "periodic": periodic,
+            "periodic": np.where(periodic)[0].tolist() if (periodic and np.any(periodic)) else False,
         }
 
         if nP>1:
@@ -63,7 +63,7 @@ def run_sampling(
 
         NS_parameters = {
             "min_num_live_points": n_live,
-            "max_num_improvement_loops": 3,
+            "max_num_improvement_loops": 2,
             "max_iters": 50000,
             "cluster_num_live_points": 20,
         }
@@ -87,10 +87,11 @@ def run_sampling(
 
         while True:
             try:
-                sampler.stepsampler = PopulationSliceSampler(
-                    popsize=2**4,
+                # sampler.stepsampler = PopulationSliceSampler(
+                sampler.stepsampler = RegionSliceSampler(
+                    # popsize=2**4,
                     nsteps=n_steps,
-                    generate_direction=generate_region_oriented_direction,
+                    # generate_direction=generate_region_oriented_direction,
                 )
 
                 sampling_result = sampler.run(
@@ -98,7 +99,7 @@ def run_sampling(
                     region_class=RobustEllipsoidRegion,
                     update_interval_volume_fraction=0.01,
                     show_status=show_status,
-                    viz_callback="auto",
+                    viz_callback=False,#"auto",
                 )
             except Exception as exc:
                 if type(exc) == KeyboardInterrupt:
@@ -131,7 +132,7 @@ def get_mean_from_sampler(results, parameter_names, mode="dynesty", output="dict
     return mean
 
 
-def get_posterior_statistics(results,parameter_names,periodic=False,mode="dynesty"):
+def get_posterior_statistics(results,parameter_names,mode="dynesty"):
 
     # if not periodic:
     #     periodic = [False]*len(parameter_names)
@@ -148,14 +149,14 @@ def get_posterior_statistics(results,parameter_names,periodic=False,mode="dynest
             post["weights"] = results["weighted_samples"]["weights"]
 
         # samp = post["samples"]
-        if periodic[i]:
-            low = priors[key]["transform"](1)
-            high = 40
-            diff = high - low
-            post["mean"] = weighted_circmean(samp, weights=weights, low=low, high=high)
-            shift_from_center = post["mean"] - diff / 2.0
+        # if periodic[i]:
+        #     low = HBI.prior_transform_single(0,key)
+        #     high = HBI.prior_transform_single(1,key)
+        #     diff = high - low
+        #     post["mean"] = weighted_circmean(samp, weights=weights, low=low, high=high)
+        #     shift_from_center = post["mean"] - diff / 2.0
 
-            samp[samp < np.mod(shift_from_center-low, diff)] += diff
+        #     samp[samp < np.mod(shift_from_center-low, diff)] += diff
         # else:
         post["mean"] = (post["samples"] * post["weights"]).sum()
         

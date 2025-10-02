@@ -179,7 +179,6 @@ class HierarchicalModel:
             self.priors[paramName]["input_constants"] = {}
 
             for var in priors_init["parameters"].keys():
-                print(var)
                 if self.priors.get(f"{param}_{var}") is None:
                     self.priors[paramName]["input_constants"][var] = priors_init["parameters"][var]
                 else:

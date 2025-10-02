@@ -84,7 +84,7 @@ def parse_name_and_indices(
 
     alts = "|".join(map(re.escape, lits))
     # Don't match inside letter-words; allow underscores and punctuation as separators.
-    rx = re.compile(rf"(?<![A-Za-z])({alts})(\d+)(?![A-Za-z])")
+    rx = re.compile(rf"_(?<![A-Za-z])({alts})(\d+)(?![A-Za-z])")
 
     found = {}
     first_pos = None
@@ -96,7 +96,10 @@ def parse_name_and_indices(
             if first_pos is None or m.start() < first_pos:
                 first_pos = m.start()
 
-    name = s[: first_pos - 1] if first_pos is not None else s
+    # Remove all matches from the string and output the remaining string
+    name = rx.sub("", s)
+
+    # name = s[: first_pos - 1] if first_pos is not None else s
     indices: List[Optional[int]] = [
         found[lit][1] if lit in found else None for lit in lits
     ]
