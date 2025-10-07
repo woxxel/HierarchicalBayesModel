@@ -320,6 +320,7 @@ class HierarchicalModel:
                 else:
 
                     offset_effective_nd = tuple(idx_ if self.priors[var]["shape"][i] > 1 else 0 for i, idx_ in enumerate(idx))
+
                     offset_effective = np.ravel_multi_index(offset_effective_nd, self.priors[var]["shape"])
 
                     idx_effective = self.priors[var]["idx"] + offset_effective
