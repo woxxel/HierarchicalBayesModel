@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import logging, os
 import itertools
@@ -21,6 +22,14 @@ class HierarchicalModel:
 
     def set_logLevel(self,logLevel):
         self.log.setLevel(logLevel)
+
+
+    def timeit(self, msg=None):
+        if msg is not None:  # and (self.time_ref):
+            self.log.debug("time for %s: %3.2f" % (msg, (time.time()-self.time_ref)*10**6))
+
+        self.time_ref = time.time()
+
 
     def prepare_data(self,event_counts,T,dimension_names=None,iter_dims=None):
         """
@@ -340,3 +349,4 @@ class HierarchicalModel:
                 params[var][...] = sliced
 
         return params
+    

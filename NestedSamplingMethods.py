@@ -29,7 +29,7 @@ def run_sampling(
 
     if mode=='dynesty':
 
-        print("running nested sampling")
+        # print("running nested sampling")
 
         options = {
             "ndim": n_params,
@@ -39,7 +39,7 @@ def run_sampling(
             # reflective=[BM.priors["p"]["idx"]] if two_pop else False,
             "periodic": np.where(periodic)[0].tolist() if (periodic and np.any(periodic)) else False,
         }
-
+        # print(f"nP={nP}")
         if nP>1:
             with dypool.Pool(nP, loglikelihood, prior_transform) as pool:
                 sampler = NestedSampler(
@@ -48,14 +48,14 @@ def run_sampling(
                     pool=pool,
                     **options,
                 )
-                sampler.run_nested(dlogz=1.)
+                sampler.run_nested(dlogz=1.,print_progress=False)
         else:
             sampler = NestedSampler(
                 loglikelihood,
                 prior_transform,
                 **options,
             )
-            sampler.run_nested(dlogz=1.)
+            sampler.run_nested(dlogz=1.,print_progress=False)
         sampling_result = sampler.results
 
         return sampling_result, sampler
