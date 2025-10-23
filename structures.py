@@ -1,7 +1,5 @@
-import numpy as np
 import inspect
 
-from scipy.special import erfinv
 
 
 def prior_structure(function=None, shape=(1,), label=None, periodic=False, reflective=False,**kwargs):
@@ -49,16 +47,6 @@ def prior_structure(function=None, shape=(1,), label=None, periodic=False, refle
         "reflective": reflective,
     }
 
-def halfnorm_ppf(x, loc, scale): 
-    return loc + scale * np.sqrt(2) * erfinv(x)
-
-
-def norm_ppf(x, mean, sigma): 
-    return mean + sigma * np.sqrt(2) * erfinv(2 * x - 1)
-
-
-def bounded_flat(x, low, high):
-    return x * (high - low) + low
 
 
 def build_key(key, tag, tag_idx=0):

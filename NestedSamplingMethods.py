@@ -1,16 +1,9 @@
 import logging
 from matplotlib import pyplot as plt
 import numpy as np
-
-from dynesty import NestedSampler, pool as dypool
-import ultranest
-from ultranest.stepsampler import RegionSliceSampler
-
-from ultranest.popstepsampler import (
-    PopulationSliceSampler,
-    generate_region_oriented_direction,
-)
-from ultranest.mlfriends import RobustEllipsoidRegion
+from .functions import circmean as weighted_circmean, modulo_with_offset
+from scipy.ndimage import gaussian_filter1d as gauss_filter
+from scipy.interpolate import interp1d
 
 
 def run_sampling(
@@ -24,10 +17,11 @@ def run_sampling(
     nP=1,
     logLevel=logging.ERROR,
 ):
-
     n_params = len(parameter_names)
 
     if mode=='dynesty':
+
+        from dynesty import NestedSampler, pool as dypool
 
         # print("running nested sampling")
 
@@ -60,6 +54,15 @@ def run_sampling(
 
         return sampling_result, sampler
     else:
+
+        import ultranest
+        from ultranest.stepsampler import RegionSliceSampler
+
+        from ultranest.popstepsampler import (
+            PopulationSliceSampler,
+            generate_region_oriented_direction,
+        )
+        from ultranest.mlfriends import RobustEllipsoidRegion
 
         NS_parameters = {
             "min_num_live_points": n_live,
@@ -113,74 +116,102 @@ def run_sampling(
         return sampling_result, sampler
 
 
-def get_mean_from_sampler(results, parameter_names, mode="dynesty", output="dict"):
+def get_samples_from_results(results, mode="dynesty"):
 
-    mean = {} if output == "dict" else []
-    for i, key in enumerate(parameter_names):
-        if mode == "dynesty":
-            samp = results.samples[:, i]
-            weights = results.importance_weights()
-        else:
-            samp = results["weighted_samples"]["points"][:, i]
-            weights = results["weighted_samples"]["weights"]
-
-        if output == "dict":
-            mean[key] = (samp * weights).sum()
-        elif output == "list":
-            mean.append((samp * weights).sum())
-        # print(f"{key} mean: {mean[key]:.3f}")
-    return mean
+    return {
+        "samples": (
+            results.samples
+            if mode == "dynesty"
+            else results["weighted_samples"]["points"]
+        ),
+        "weights": (
+            results.importance_weights()
+            if mode == "dynesty"
+            else results["weighted_samples"]["weights"]
+        ),
+    }
 
 
-def get_posterior_statistics(results,parameter_names,mode="dynesty"):
+def get_single_posterior_from_samples(
+    samp,
+    weights,
+    periodic=False,
+    x=None,
+    qs=[0.05, 0.341, 0.5, 0.841, 0.95],
+    smooth_sigma=1.0,
+):  # , parameter_names, mode="dynesty", output="dict"):
 
-    # if not periodic:
-    #     periodic = [False]*len(parameter_names)
+    qs = [0.001, 0.05, 0.341, 0.5, 0.841, 0.95, 0.999]
+
+    samp = np.array(samp).copy()
 
     posterior = {}
-    for i, key in enumerate(parameter_names):
+    if isinstance(periodic, list):
+        # print("this is periodic: ", periodic)
+        low, high = periodic
+        diff = high - low
 
-        post = {}
-        if mode == "dynesty":
-            post["samples"] = results.samples[:, i]
-            post["weights"] = results.importance_weights()
-        else:
-            post["samples"] = results["weighted_samples"]["points"][:, i]
-            post["weights"] = results["weighted_samples"]["weights"]
+        posterior["mean"] = weighted_circmean(samp, weights=weights, low=low, high=high)
+        shift_from_center = (
+            posterior["mean"] - low - diff / 2.0
+        )  # shift field to the center
 
-        # samp = post["samples"]
-        # if periodic[i]:
-        #     low = HBI.prior_transform_single(0,key)
-        #     high = HBI.prior_transform_single(1,key)
-        #     diff = high - low
-        #     post["mean"] = weighted_circmean(samp, weights=weights, low=low, high=high)
-        #     shift_from_center = post["mean"] - diff / 2.0
+        samp[
+            samp < np.mod(shift_from_center - low, diff)
+        ] += diff  # move lower part above the wrap point to allow proper posterior
+    else:
+        low, high = None, None
+        posterior["mean"] = (samp * weights).sum()
 
-        #     samp[samp < np.mod(shift_from_center-low, diff)] += diff
-        # else:
-        post["mean"] = (post["samples"] * post["weights"]).sum()
-        
-        post["stdev"] = np.sqrt((post["weights"] * (post["samples"] - post["mean"])**2).sum())
+    idx_sorted = np.argsort(samp)
+    samples_sorted = samp[idx_sorted]
 
-        # idx_sorted = np.argsort(samp)
-        # samples_sorted = samp[idx_sorted]
+    # get corresponding weights
+    sw = weights[idx_sorted]
 
-        # # get corresponding weights
-        # sw = weights[idx_sorted]
+    cumsw = np.cumsum(sw)
+    quants = np.interp(qs, cumsw, samples_sorted)
 
-        # cumsw = np.cumsum(sw)
-        # quants = np.interp(qs, cumsw, samples_sorted)
+    posterior["CI"] = modulo_with_offset(quants[1:-1], low, high)
+    posterior["stdev"] = np.sqrt((weights * (samp - posterior["mean"]) ** 2).sum())
 
-        # x = self.posterior_arrays[param_name]
+    if x is not None:
+        f = interp1d(
+            modulo_with_offset(samples_sorted, low, high),
+            cumsw,
+            bounds_error=False,
+            fill_value="extrapolate",
+        )
 
-        # f = interp1d(
-        #     np.mod(samples_sorted, self.n_bin) if param_name == "theta" else samples_sorted,
-        #     cumsw, 
-        #     bounds_error=False, 
-        #     fill_value="extrapolate"
-        # )
-    
-        posterior[key] = post
+        # cdf makes jump at wrap-point, resulting in a single negative value. "Maximum" fixes this, but is not ideal
+        posterior["p_x"] = np.maximum(
+            0,
+            (
+                gauss_filter(f(x[1:]) - f(x[:-1]), smooth_sigma)
+                if smooth_sigma > 0
+                else f(x[1:]) - f(x[:-1])
+            ),
+        )
+
+    return posterior
+
+
+def get_posterior_from_samples(
+    samp, weights, parameter_names=None, periodic=None, **kwargs
+):
+
+    iterator = range(samp.shape[1]) if parameter_names is None else parameter_names
+
+    if periodic is None:
+        periodic = [False] * samp.shape[1]
+
+    posterior = {}
+    for i, key in enumerate(iterator):
+
+        # print(f"computing mean for parameter {key}, periodic={periodic[i]}")
+        posterior[key] = get_single_posterior_from_samples(
+            samp[:, i], weights, periodic=periodic[i], **kwargs
+        )
 
     return posterior
 
@@ -189,9 +220,19 @@ def plot_results(BM,results,mode="dynesty",truths=None):
 
     # priors = {key:prior for key,prior in BM.priors.items() if prior["transform"] is not None}
 
-    max_percentile = 99.9
+    samples = get_samples_from_results(results, mode=mode)
+    posterior = get_posterior_from_samples(
+        samples["samples"],
+        samples["weights"],
+        BM.parameter_names_all,
+        BM.periodic_boundaries,
+        qs=[0.341, 0.5, 0.841, 0.999],
+    )
 
-    posterior = get_posterior_statistics(results,BM.parameter_names_all,mode=mode)
+    samples_dict = {
+        key: samples["samples"][:, i] for i, key in enumerate(BM.parameter_names_all)
+    }
+
     plot_params = [key for key in BM.parameter_names if BM.priors[key]["transform"] is not None]
     fig,axes = plt.subplots(nrows=len(plot_params), ncols=1, figsize=(10, 1.5*len(plot_params)),sharex=True)
     for i,key in enumerate(plot_params):
@@ -203,7 +244,13 @@ def plot_results(BM,results,mode="dynesty",truths=None):
         if prior["n"] == 1:
             # print("Single population model")
             plot_prior(axes[i], prior, color="tab:green", label="prior")
-            plot_posterior(axes[i],posterior[key], alpha=0.5)
+            plot_posterior(
+                axes[i],
+                samples_dict[key],
+                samples["weights"],
+                posterior[key],
+                alpha=0.5,
+            )
             title_str += f" [${posterior[key]['mean']:.3f}\pm{posterior[key]['stdev']:.3f}$]"
 
             if truths and key in truths:
@@ -219,29 +266,18 @@ def plot_results(BM,results,mode="dynesty",truths=None):
                     key_hierarchy = f"{key}_{var}"
                     # print(key_hierarchy, BM.priors[key_hierarchy])
                     plot_prior(axes[i], BM.priors[key_hierarchy], color=col, label="prior")
-                    plot_posterior(axes[i],posterior[key_hierarchy], color=col)
+                    plot_posterior(
+                        axes[i],
+                        samples_dict[key_hierarchy],
+                        samples["weights"],
+                        posterior[key_hierarchy],
+                        color=col,
+                    )
                     axes[i].axhline(posterior[key_hierarchy]["mean"], color=col, linestyle="--", label="posterior (meta)")
 
                     if var=="mean":
-                        try:
-                            y_max = max(
-                                y_max,
-                                np.percentile(
-                                    posterior[key_hierarchy]["samples"],
-                                    [max_percentile],
-                                    method="inverted_cdf",
-                                    weights=posterior[key_hierarchy]["weights"],
-                                ),
-                            )
-                        except:
-                            y_max = max(
-                                y_max,
-                                np.percentile(
-                                    posterior[key_hierarchy]["samples"],
-                                    [max_percentile],
-                                ),
-                            )
-                            # ylim=np.percentile(posterior[key_hierarchy]["samples"], [0.01,99.99],method="inverted_cdf",weights=posterior[key_hierarchy]["weights"]))
+                        y_max = max(y_max, posterior[key_hierarchy]["CI"][-1])
+
                         title_str += f" [${posterior[key_hierarchy]['mean']:.3f}\pm{posterior[key_hierarchy]['stdev']:.3f}$]"
 
                 if truths and key in truths:
@@ -251,26 +287,18 @@ def plot_results(BM,results,mode="dynesty",truths=None):
 
             for n in range(prior["n"]):
                 bottom = 1.+n/2
-                plot_posterior(axes[i],posterior[f"{key}_{n}"], bottom=bottom, color="grey", alpha=0.5, label="posterior (pop)" if n==0 else None)
+                plot_posterior(
+                    axes[i],
+                    samples_dict[f"{key}_{n}"],
+                    samples["weights"],
+                    posterior[f"{key}_{n}"],
+                    bottom=bottom,
+                    color="grey",
+                    alpha=0.5,
+                    label="posterior (pop)" if n == 0 else None,
+                )
 
-                try:
-                    y_max = max(
-                        y_max,
-                        np.percentile(
-                            posterior[f"{key}_{n}"]["samples"],
-                            [max_percentile],
-                            method="inverted_cdf",
-                            weights=posterior[f"{key}_{n}"]["weights"],
-                        ),
-                    )
-                except:
-                    y_max = max(
-                        y_max,
-                        np.percentile(
-                            posterior[f"{key}_{n}"]["samples"], [max_percentile]
-                        ),
-                    )
-                    # ylim=np.percentile(posterior[f"{key}_{n}"]["samples"], [0.01,99.99],method="inverted_cdf",weights=posterior[f"{key}_{n}"]["weights"]))
+                y_max = max(y_max, posterior[f"{key}_{n}"]["CI"][-1])
 
                 if not prior["has_meta"]:
                     axes[i].text(bottom,posterior[f"{key}_{n}"]["mean"],f"${posterior[f'{key}_{n}']['mean']:.3f}\pm{posterior[f'{key}_{n}']['stdev']:.3f}$",va="bottom")
@@ -300,28 +328,25 @@ def plot_results(BM,results,mode="dynesty",truths=None):
 
 from scipy.ndimage import gaussian_filter
 
-def plot_posterior(ax,posterior,**kwargs):
+
+def plot_posterior(ax, samples, weights, posterior, **kwargs):
 
     offset = kwargs.get("bottom", 0.0)
 
     # print(samples_sorted)
-    x = posterior["samples"]
-    weights = posterior["weights"]
+    # x = posterior["samples"]
+    # weights = posterior["weights"]
     try:
         span = np.percentile(
-            posterior["samples"], [0.1, 99.9], weights=weights, method="inverted_cdf"
+            samples, [0.1, 99.9], weights=weights, method="inverted_cdf"
         )
     except:
-        span = np.percentile(posterior["samples"], [0.1, 99.9])
+        span = np.percentile(samples, [0.1, 99.9])
     span[0] = 0
     sx = 0.02
     bins = int(round(10. / sx))
 
-    n, b = np.histogram(x,
-        bins=bins,
-        weights=weights,
-        range=np.sort(span)
-    )
+    n, b = np.histogram(samples, bins=bins, weights=weights, range=np.sort(span))
 
     n = gaussian_filter(n, 10.)
     n /= n.max()*2 * 1.1
@@ -330,6 +355,7 @@ def plot_posterior(ax,posterior,**kwargs):
     ax.fill_betweenx(b[:-1], offset, offset + n, color=kwargs.get("color", "tab:grey"), alpha=kwargs.get("alpha", 0.7))
 
     ax.plot(offset,posterior["mean"],"o",color=kwargs.get("color","tab:grey"),markersize=5)
+
 
 def plot_prior(ax, prior, **kwargs):
 
