@@ -1,6 +1,8 @@
 import logging
 from matplotlib import pyplot as plt
 import numpy as np
+
+from inference.HierarchicalBayesModel.structures import parse_name_and_indices
 from .functions import circmean as weighted_circmean, modulo_with_offset
 from scipy.ndimage import gaussian_filter1d as gauss_filter
 from scipy.interpolate import interp1d
@@ -15,7 +17,9 @@ def run_sampling(
     mode="dynesty",
     n_live=100,
     nP=1,
+    dlogz=1.0,
     logLevel=logging.ERROR,
+    show_status=False,
 ):
     n_params = len(parameter_names)
 
@@ -42,14 +46,14 @@ def run_sampling(
                     pool=pool,
                     **options,
                 )
-                sampler.run_nested(dlogz=1.,print_progress=False)
+                sampler.run_nested(dlogz=dlogz, print_progress=show_status)
         else:
             sampler = NestedSampler(
                 loglikelihood,
                 prior_transform,
                 **options,
             )
-            sampler.run_nested(dlogz=1.,print_progress=False)
+            sampler.run_nested(dlogz=dlogz, print_progress=show_status)
         sampling_result = sampler.results
 
         return sampling_result, sampler
@@ -197,8 +201,10 @@ def get_single_posterior_from_samples(
 
 
 def get_posterior_from_samples(
-    samp, weights, parameter_names=None, periodic=None, **kwargs
+    samp, weights, parameter_names=None, periodic=None, x={}, **kwargs
 ):
+
+    assert isinstance(x, dict), "x input must be dict with parameter names as keys"
 
     iterator = range(samp.shape[1]) if parameter_names is None else parameter_names
 
@@ -208,9 +214,10 @@ def get_posterior_from_samples(
     posterior = {}
     for i, key in enumerate(iterator):
 
-        # print(f"computing mean for parameter {key}, periodic={periodic[i]}")
+        name, (pop_idx, cond_idx) = parse_name_and_indices(key, ["pop", ""])
+
         posterior[key] = get_single_posterior_from_samples(
-            samp[:, i], weights, periodic=periodic[i], **kwargs
+            samp[:, i], weights, periodic=periodic[i], x=x.get(name, None), **kwargs
         )
 
     return posterior
