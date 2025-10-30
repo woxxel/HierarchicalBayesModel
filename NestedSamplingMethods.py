@@ -2,10 +2,31 @@ import logging
 from matplotlib import pyplot as plt
 import numpy as np
 
-from inference.HierarchicalBayesModel.structures import parse_name_and_indices
-from .functions import circmean as weighted_circmean, modulo_with_offset
 from scipy.ndimage import gaussian_filter1d as gauss_filter
 from scipy.interpolate import interp1d
+
+from pathos.multiprocessing import ProcessingPool
+
+from .structures import parse_name_and_indices
+from .functions import circmean as weighted_circmean, modulo_with_offset
+
+
+class PathosPool:
+    def __init__(self, nodes):
+        self._p = ProcessingPool(nodes=nodes)
+        self.size = nodes
+
+    def map(self, func, iterable):
+        return self._p.map(func, iterable)
+
+    def close(self):
+        self._p.close()
+
+    def terminate(self):
+        self._p.terminate()
+
+    def join(self):
+        self._p.join()
 
 
 def run_sampling(
@@ -23,101 +44,113 @@ def run_sampling(
 ):
     n_params = len(parameter_names)
 
-    if mode=='dynesty':
+    # if mode=='dynesty':
 
-        from dynesty import NestedSampler, pool as dypool
+    from dynesty import NestedSampler  # , pool as dypool
 
-        # print("running nested sampling")
+    # print("running nested sampling")
 
-        options = {
-            "ndim": n_params,
-            "nlive": n_live,
-            "bound": "single",
-            "sample": "rslice",
-            # reflective=[BM.priors["p"]["idx"]] if two_pop else False,
-            "periodic": np.where(periodic)[0].tolist() if (periodic and np.any(periodic)) else False,
-        }
-        # print(f"nP={nP}")
-        if nP>1:
-            with dypool.Pool(nP, loglikelihood, prior_transform) as pool:
-                sampler = NestedSampler(
-                    pool.loglike,
-                    pool.prior_transform,
-                    pool=pool,
-                    **options,
-                )
-                sampler.run_nested(dlogz=dlogz, print_progress=show_status)
-        else:
-            sampler = NestedSampler(
-                loglikelihood,
-                prior_transform,
-                **options,
-            )
-            sampler.run_nested(dlogz=dlogz, print_progress=show_status)
-        sampling_result = sampler.results
-
-        return sampling_result, sampler
-    else:
-
-        import ultranest
-        from ultranest.stepsampler import RegionSliceSampler
-
-        from ultranest.popstepsampler import (
-            PopulationSliceSampler,
-            generate_region_oriented_direction,
-        )
-        from ultranest.mlfriends import RobustEllipsoidRegion
-
-        NS_parameters = {
-            "min_num_live_points": n_live,
-            "max_num_improvement_loops": 2,
-            "max_iters": 50000,
-            "cluster_num_live_points": 20,
-        }
-
-        logger = logging.getLogger("ultranest")
-        logger.setLevel(logLevel)
-
-        sampling_result = None
-        show_status = True
-        n_steps = 10
-
-        sampler = ultranest.ReactiveNestedSampler(
-            parameter_names,
+    options = {
+        "ndim": n_params,
+        "nlive": n_live,
+        "bound": "single",
+        "sample": "rslice",
+        # reflective=[BM.priors["p"]["idx"]] if two_pop else False,
+        "periodic": (
+            np.where(periodic)[0].tolist() if (periodic and np.any(periodic)) else False
+        ),
+    }
+    # print(f"nP={nP}")
+    if nP > 1:
+        # using dypool pool sadly does not work, as it does not support pickling class methods for v3.+
+        # choice for pathos as alternative is on a whim
+        pool = PathosPool(nP)
+        sampler = NestedSampler(
             loglikelihood,
             prior_transform,
-            # wrapped_params=BM.wrap,
-            vectorized=True,
-            num_bootstraps=20,
-            ndraw_min=512,
+            pool=pool,
+            queue_size=pool.size,
+            **options,
         )
+        # with dypool.Pool(nP, loglikelihood, prior_transform) as pool:
+        #     sampler = NestedSampler(
+        #         pool.loglike,
+        #         pool.prior_transform,
+        #         pool=pool,
+        #         **options,
+        #     )
+        sampler.run_nested(dlogz=dlogz, print_progress=show_status)
+    else:
+        sampler = NestedSampler(
+            loglikelihood,
+            prior_transform,
+            **options,
+        )
+        sampler.run_nested(dlogz=dlogz, print_progress=show_status)
+    sampling_result = sampler.results
 
-        while True:
-            try:
-                # sampler.stepsampler = PopulationSliceSampler(
-                sampler.stepsampler = RegionSliceSampler(
-                    # popsize=2**4,
-                    nsteps=n_steps,
-                    # generate_direction=generate_region_oriented_direction,
-                )
+    return sampling_result, sampler
+    # else:
 
-                sampling_result = sampler.run(
-                    **NS_parameters,
-                    region_class=RobustEllipsoidRegion,
-                    update_interval_volume_fraction=0.01,
-                    show_status=show_status,
-                    viz_callback=False,#"auto",
-                )
-            except Exception as exc:
-                if type(exc) == KeyboardInterrupt:
-                    break
-                if type(exc) == TimeoutException:
-                    raise TimeoutException("Sampling took too long")
-                n_steps *= 2
-                print(f"increasing step size to {n_steps=}")
-                if n_steps > 100:
-                    break
-        return sampling_result, sampler
+    #     import ultranest
+    #     from ultranest.stepsampler import RegionSliceSampler
+
+    #     from ultranest.popstepsampler import (
+    #         PopulationSliceSampler,
+    #         generate_region_oriented_direction,
+    #     )
+    #     from ultranest.mlfriends import RobustEllipsoidRegion
+
+    #     NS_parameters = {
+    #         "min_num_live_points": n_live,
+    #         "max_num_improvement_loops": 2,
+    #         "max_iters": 50000,
+    #         "cluster_num_live_points": 20,
+    #     }
+
+    #     logger = logging.getLogger("ultranest")
+    #     logger.setLevel(logLevel)
+
+    #     sampling_result = None
+    #     show_status = True
+    #     n_steps = 10
+
+    #     sampler = ultranest.ReactiveNestedSampler(
+    #         parameter_names,
+    #         loglikelihood,
+    #         prior_transform,
+    #         # wrapped_params=BM.wrap,
+    #         vectorized=True,
+    #         num_bootstraps=20,
+    #         ndraw_min=512,
+    #     )
+
+    #     while True:
+    #         try:
+    #             # sampler.stepsampler = PopulationSliceSampler(
+    #             sampler.stepsampler = RegionSliceSampler(
+    #                 # popsize=2**4,
+    #                 nsteps=n_steps,
+    #                 # generate_direction=generate_region_oriented_direction,
+    #             )
+
+    #             sampling_result = sampler.run(
+    #                 **NS_parameters,
+    #                 region_class=RobustEllipsoidRegion,
+    #                 update_interval_volume_fraction=0.01,
+    #                 show_status=show_status,
+    #                 viz_callback=False,#"auto",
+    #             )
+    #         except Exception as exc:
+    #             if type(exc) == KeyboardInterrupt:
+    #                 break
+    #             if type(exc) == TimeoutException:
+    #                 raise TimeoutException("Sampling took too long")
+    #             n_steps *= 2
+    #             print(f"increasing step size to {n_steps=}")
+    #             if n_steps > 100:
+    #                 break
+    #     return sampling_result, sampler
 
 
 def get_samples_from_results(results, mode="dynesty"):
@@ -258,7 +291,9 @@ def plot_results(BM,results,mode="dynesty",truths=None):
                 posterior[key],
                 alpha=0.5,
             )
-            title_str += f" [${posterior[key]['mean']:.3f}\pm{posterior[key]['stdev']:.3f}$]"
+            title_str += (
+                f" [${posterior[key]['mean']:.3f}\\pm{posterior[key]['stdev']:.3f}$]"
+            )
 
             if truths and key in truths:
                 axes[i].axhline(truths[key], color="tab:red", linestyle="--", label="truth")
@@ -285,7 +320,7 @@ def plot_results(BM,results,mode="dynesty",truths=None):
                     if var=="mean":
                         y_max = max(y_max, posterior[key_hierarchy]["CI"][-1])
 
-                        title_str += f" [${posterior[key_hierarchy]['mean']:.3f}\pm{posterior[key_hierarchy]['stdev']:.3f}$]"
+                        title_str += f" [${posterior[key_hierarchy]['mean']:.3f}\\pm{posterior[key_hierarchy]['stdev']:.3f}$]"
 
                 if truths and key in truths:
                     axes[i].axhline(truths[key], color="tab:red", linestyle="--", label="truth")
@@ -308,7 +343,12 @@ def plot_results(BM,results,mode="dynesty",truths=None):
                 y_max = max(y_max, posterior[f"{key}_{n}"]["CI"][-1])
 
                 if not prior["has_meta"]:
-                    axes[i].text(bottom,posterior[f"{key}_{n}"]["mean"],f"${posterior[f'{key}_{n}']['mean']:.3f}\pm{posterior[f'{key}_{n}']['stdev']:.3f}$",va="bottom")
+                    axes[i].text(
+                        bottom,
+                        posterior[f"{key}_{n}"]["mean"],
+                        f"${posterior[f'{key}_{n}']['mean']:.3f}\\pm{posterior[f'{key}_{n}']['stdev']:.3f}$",
+                        va="bottom",
+                    )
 
                     if truths and (key in truths):
                         if isinstance(truths[key], (list, np.ndarray)):
