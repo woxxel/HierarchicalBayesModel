@@ -2,6 +2,10 @@ import time
 import numpy as np
 import logging, os
 import itertools
+import warnings
+
+warnings.filterwarnings("ignore")
+logging.basicConfig(level=logging.INFO)
 
 class HierarchicalModel:
     """
@@ -16,20 +20,19 @@ class HierarchicalModel:
         self.log = logging.getLogger("nestLogger")
         self.set_logLevel(logLevel)
 
-        os.environ['MKL_NUM_THREADS'] = '1'
-        os.environ['OPENBLAS_NUM_THREADS'] = '1'
-        os.environ['OMP_NUM_THREADS'] = '1'
+        # os.environ['MKL_NUM_THREADS'] = '1'
+        # os.environ['OPENBLAS_NUM_THREADS'] = '1'
+        # os.environ['OMP_NUM_THREADS'] = '1'
 
     def set_logLevel(self,logLevel):
         self.log.setLevel(logLevel)
 
-
     def timeit(self, msg=None):
         if msg is not None:  # and (self.time_ref):
+            # print(msg)
             self.log.debug("time for %s: %3.2f" % (msg, (time.time()-self.time_ref)*10**6))
 
         self.time_ref = time.time()
-
 
     def prepare_data(self,event_counts,T,dimension_names=None,iter_dims=None):
         """
@@ -90,6 +93,11 @@ class HierarchicalModel:
                 itertools.product(*[range(s) for s in self.dimensions["shape_iter"]])
             )
 
+        self.dims = {}
+        for dim, n in zip(self.dimensions["names"], self.dimensions["shape"]):
+            # self.log.debug(f"Data dimension {dim}: {n}")
+            self.dims[f"n_{dim}"] = n
+
         self.data["n_neurons"] = np.array(
             [np.isfinite(events).sum(axis=-1) for events in self.data["event_counts"]]
         )
@@ -134,7 +142,6 @@ class HierarchicalModel:
 
             ## then, add the actual parameters for the hierarchical prior
             self.set_prior_param(prior, prior_key, has_meta=prior.get("has_meta", False))
-
 
     def set_prior_param(
         self, priors_init, param, key=None, has_meta=False
@@ -220,11 +227,10 @@ class HierarchicalModel:
                 ]
             else:
                 return False, False
-        
 
         if self.priors[paramName]["n"] == 1:
             self.parameter_names_all.append(paramName)
-            
+
             periodic, bounds = get_periodicity(priors_init)
             self.periodic.append(periodic)
             self.periodic_boundaries.append(bounds)
@@ -232,13 +238,12 @@ class HierarchicalModel:
             self.reflective.append(priors_init["reflective"])
         else:
             self.parameter_names_all.extend([f"{paramName}_{i}" for i in range(self.priors[paramName]["n"])])
-            
+
             periodic, bounds = get_periodicity(priors_init)
             self.periodic.extend([periodic for _ in range(self.priors[paramName]["n"])])
             self.periodic_boundaries.extend([bounds for _ in range(self.priors[paramName]["n"])])
-            
-            self.reflective.extend([priors_init["reflective"] for _ in range(self.priors[paramName]["n"])])
 
+            self.reflective.extend([priors_init["reflective"] for _ in range(self.priors[paramName]["n"])])
 
     def set_prior_transform(self,vectorized=True):
         '''
@@ -255,7 +260,7 @@ class HierarchicalModel:
                 transforms a single prior parameter from unit hypercube to actual prior
                 and stores value in "current_value" field of prior for quick access
             """
-                    
+
             # print(f"Transforming {key} with shape {p_in.shape}")
             this_prior = self.priors[key]
             input_keys = {}
@@ -274,7 +279,6 @@ class HierarchicalModel:
             )
             return this_prior["current_value"]
 
-
         def prior_transform(p_in):
 
             """
@@ -290,7 +294,7 @@ class HierarchicalModel:
             for key, prior in self.priors.items():
                 if prior["transform"] is None:
                     continue
-                
+
                 p_out[:, prior["idx"] : prior["idx"] + prior["n"]] = prior_transform_single(
                     p_in[:, prior["idx"]:prior["idx"] + prior["n"]].reshape((n_chain,)+prior["shape"]),
                     key
@@ -302,7 +306,6 @@ class HierarchicalModel:
                 return p_out[0,:]
 
         return prior_transform
-
 
     def get_params_from_p(self, p_in, idx_chain=None, idx=None):
         """
@@ -350,4 +353,3 @@ class HierarchicalModel:
                 params[var][...] = sliced
 
         return params
-    

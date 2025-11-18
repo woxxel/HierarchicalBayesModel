@@ -1,11 +1,22 @@
-import logging
-from matplotlib import pyplot as plt
+import logging, os
+
+# os.environ["OMP_NUM_THREADS"] = "1"
+# os.environ["OPENBLAS_NUM_THREADS"] = "1"
+# os.environ["MKL_NUM_THREADS"] = "1"
+# os.environ["BLIS_NUM_THREADS"] = "1"
+# os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import numpy as np
+
+from matplotlib import pyplot as plt
 
 from scipy.ndimage import gaussian_filter1d as gauss_filter
 from scipy.interpolate import interp1d
 
-from pathos.multiprocessing import ProcessingPool
+from dynesty import NestedSampler  # , pool as dypool
+import pathos.multiprocessing as mp
+
+# from pathos.multiprocessing import ProcessingPool
 
 from .structures import parse_name_and_indices
 from .functions import circmean as weighted_circmean, modulo_with_offset
@@ -13,7 +24,12 @@ from .functions import circmean as weighted_circmean, modulo_with_offset
 
 class PathosPool:
     def __init__(self, nodes):
-        self._p = ProcessingPool(nodes=nodes)
+
+        os.environ["OMP_NUM_THREADS"] = "1"
+        os.environ["OPENBLAS_NUM_THREADS"] = "1"
+        os.environ["MKL_NUM_THREADS"] = "1"
+
+        self._p = mp.ProcessingPool(nodes=nodes)
         self.size = nodes
 
     def map(self, func, iterable):
@@ -35,20 +51,15 @@ def run_sampling(
     parameter_names,
     periodic=None,
     reflective=None,
-    mode="dynesty",
     n_live=100,
     nP=1,
     dlogz=1.0,
     logLevel=logging.ERROR,
     show_status=False,
 ):
-    n_params = len(parameter_names)
-
-    # if mode=='dynesty':
-
-    from dynesty import NestedSampler  # , pool as dypool
-
     # print("running nested sampling")
+
+    n_params = len(parameter_names)
 
     options = {
         "ndim": n_params,
@@ -72,13 +83,6 @@ def run_sampling(
             queue_size=pool.size,
             **options,
         )
-        # with dypool.Pool(nP, loglikelihood, prior_transform) as pool:
-        #     sampler = NestedSampler(
-        #         pool.loglike,
-        #         pool.prior_transform,
-        #         pool=pool,
-        #         **options,
-        #     )
         sampler.run_nested(dlogz=dlogz, print_progress=show_status)
     else:
         sampler = NestedSampler(
@@ -90,67 +94,6 @@ def run_sampling(
     sampling_result = sampler.results
 
     return sampling_result, sampler
-    # else:
-
-    #     import ultranest
-    #     from ultranest.stepsampler import RegionSliceSampler
-
-    #     from ultranest.popstepsampler import (
-    #         PopulationSliceSampler,
-    #         generate_region_oriented_direction,
-    #     )
-    #     from ultranest.mlfriends import RobustEllipsoidRegion
-
-    #     NS_parameters = {
-    #         "min_num_live_points": n_live,
-    #         "max_num_improvement_loops": 2,
-    #         "max_iters": 50000,
-    #         "cluster_num_live_points": 20,
-    #     }
-
-    #     logger = logging.getLogger("ultranest")
-    #     logger.setLevel(logLevel)
-
-    #     sampling_result = None
-    #     show_status = True
-    #     n_steps = 10
-
-    #     sampler = ultranest.ReactiveNestedSampler(
-    #         parameter_names,
-    #         loglikelihood,
-    #         prior_transform,
-    #         # wrapped_params=BM.wrap,
-    #         vectorized=True,
-    #         num_bootstraps=20,
-    #         ndraw_min=512,
-    #     )
-
-    #     while True:
-    #         try:
-    #             # sampler.stepsampler = PopulationSliceSampler(
-    #             sampler.stepsampler = RegionSliceSampler(
-    #                 # popsize=2**4,
-    #                 nsteps=n_steps,
-    #                 # generate_direction=generate_region_oriented_direction,
-    #             )
-
-    #             sampling_result = sampler.run(
-    #                 **NS_parameters,
-    #                 region_class=RobustEllipsoidRegion,
-    #                 update_interval_volume_fraction=0.01,
-    #                 show_status=show_status,
-    #                 viz_callback=False,#"auto",
-    #             )
-    #         except Exception as exc:
-    #             if type(exc) == KeyboardInterrupt:
-    #                 break
-    #             if type(exc) == TimeoutException:
-    #                 raise TimeoutException("Sampling took too long")
-    #             n_steps *= 2
-    #             print(f"increasing step size to {n_steps=}")
-    #             if n_steps > 100:
-    #                 break
-    #     return sampling_result, sampler
 
 
 def get_samples_from_results(results, mode="dynesty"):
@@ -383,13 +326,13 @@ def plot_posterior(ax, samples, weights, posterior, **kwargs):
     # print(samples_sorted)
     # x = posterior["samples"]
     # weights = posterior["weights"]
-    try:
-        span = np.percentile(
-            samples, [0.1, 99.9], weights=weights, method="inverted_cdf"
-        )
-    except:
-        span = np.percentile(samples, [0.1, 99.9])
-    span[0] = 0
+    # try:
+    span = np.percentile(
+        samples, [0.001, 99.999], weights=weights, method="inverted_cdf"
+    )
+    # except:
+    #     span = np.percentile(samples, [0.1, 99.999])
+    span[0] = min(0, span[0])
     sx = 0.02
     bins = int(round(10. / sx))
 
