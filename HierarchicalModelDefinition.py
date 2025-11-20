@@ -30,7 +30,9 @@ class HierarchicalModel:
     def timeit(self, msg=None):
         if msg is not None:  # and (self.time_ref):
             # print(msg)
-            self.log.debug("time for %s: %3.2f" % (msg, (time.time()-self.time_ref)*10**6))
+            self.log.debug(
+                "time for %s: %3.2f ms" % (msg, (time.time() - self.time_ref) * 10**3)
+            )
 
         self.time_ref = time.time()
 
